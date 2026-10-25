@@ -73,19 +73,29 @@ function acceptWebSocket(req, socket) {
 /** 编码一个服务端 → 客户端的文本帧（不做掩码）。 */
 function encodeTextFrame(text) {
   const payload = Buffer.from(text, 'utf8');
+  return encodeFrame(0x1, payload);
+}
+
+/**
+ * 编码任意帧。
+ * @param {number} opcode 0x1 文本 / 0x8 关闭 / 0x9 ping / 0xA pong
+ * @param {Buffer|string} data
+ */
+function encodeFrame(opcode, data) {
+  const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data ?? ''), 'utf8');
   const len = payload.length;
   let header;
 
   if (len < 126) {
-    header = Buffer.from([0x81, len]);
+    header = Buffer.from([0x80 | opcode, len]);
   } else if (len < 65536) {
     header = Buffer.alloc(4);
-    header[0] = 0x81;
+    header[0] = 0x80 | opcode;
     header[1] = 126;
     header.writeUInt16BE(len, 2);
   } else {
     header = Buffer.alloc(10);
-    header[0] = 0x81;
+    header[0] = 0x80 | opcode;
     header[1] = 127;
     header.writeBigUInt64BE(BigInt(len), 2);
   }
@@ -93,11 +103,49 @@ function encodeTextFrame(text) {
 }
 
 /**
+ * 给 upgrade 得到的 socket 挂上「连接真的结束了」的清理钩子。
+ *
+ * 这是整个服务器最容易踩的坑，实测确认过：
+ *   `http.Server` 的 `upgrade` 事件交出来的 socket **不会**触发 `close` 事件
+ *   （它没有被 http 模块托管生命周期），客户端断开时只触发 `end`。
+ *   只监听 `close` 的话，客户端走了服务器永远不知道 ——
+ *   房间里挂着一个幽灵玩家，房间也永远不回收。
+ *
+ * 所以这里同时监听 end / close / error，并用 flag 保证只清理一次。
+ *
+ * @param {import('node:net').Socket} socket
+ * @param {() => void} cleanup
+ * @returns {() => void} 用于在正常关闭时主动调用
+ */
+function onSocketGone(socket, cleanup) {
+  let done = false;
+  const once = () => {
+    if (done) return;
+    done = true;
+    try {
+      cleanup();
+    } catch {
+      /* 清理失败不该拖垮进程 */
+    }
+  };
+
+  socket.on('end', once); // 客户端半关闭：http upgrade socket 上最常见
+  socket.on('close', once); // 完整关闭
+  socket.on('error', once); // 写失败等
+
+  return once;
+}
+
+/**
  * 增量解析客户端帧。
  * 关键：TCP 不保证一条消息一个 chunk —— 半个帧、两个帧粘一起都是常态。
  * 不做这个缓冲，联机就会随机丢输入。
+ *
+ * @param onMessage 文本帧回调
+ * @param onClose 关闭帧回调
+ * @param onControl 控制帧回调 (opcode, payload)：ping/pong 靠它处理
  */
-function createFrameReader(onMessage, onClose) {
+function createFrameReader(onMessage, onClose, onControl) {
   let buffer = Buffer.alloc(0);
 
   return (chunk) => {
@@ -136,7 +184,17 @@ function createFrameReader(onMessage, onClose) {
         onClose();
         return;
       }
-      if (opcode === 0x9) continue; // ping 忽略
+      // RFC 6455：收到 ping 必须回 pong，否则对端会认为连接已死。
+      // 云平台的代理（Render/Railway/Cloudflare）靠这个判断连接活性，
+      // 不回 pong 会导致连接被中途掐断。
+      if (opcode === 0x9) {
+        onControl?.(0xa, payload);
+        continue;
+      }
+      if (opcode === 0xa) {
+        onControl?.(0xa, null); // pong 收到，刷新活跃时间
+        continue;
+      }
       if (opcode === 0x1) {
         try {
           onMessage(JSON.parse(payload.toString('utf8')));
@@ -161,9 +219,11 @@ class Room {
     this.code = code;
     this.state = createState({ width: FIELD.w, height: FIELD.h });
     this.clients = new Map(); // socket -> { side }
-    this.timer = null;
+    this.timer = null; // 物理 tick（两人都在场时才跑）
+    this.reaper = null; // 空房间回收巡查（独立于 tick）
     this.last = Date.now();
     this.rematchRequested = new Set();
+    this.startReaper();
   }
 
   get size() {
@@ -191,6 +251,22 @@ class Room {
     if (this.clients.size === 2) this.start();
   }
 
+  /**
+   * 空房间巡查。
+   *
+   * 为什么不能只靠 tick() 里的检查：
+   * 物理 tick 只在**两个人都在场**时才启动（见 start()），
+   * 所以「单人建了房、然后走掉」这种最常见的场景下 tick 根本没在跑，
+   * 空房间就永远不会被回收 —— 云平台上连续跑几天，房间会越积越多。
+   * 这里单独起一个低频巡查，专门管回收。
+   */
+  startReaper() {
+    if (this.reaper) return;
+    this.reaper = setInterval(() => {
+      if (this.clients.size === 0) this.destroy();
+    }, 1000);
+  }
+
   leave(socket) {
     const entry = this.clients.get(socket);
     this.clients.delete(socket);
@@ -208,6 +284,12 @@ class Room {
   }
 
   tick() {
+    // 空房间不空转：云平台上进程要跑很久，没人的房间必须停表。
+    if (this.clients.size === 0) {
+      this.destroy();
+      return;
+    }
+
     const now = Date.now();
     const dt = (now - this.last) / 1000;
     this.last = now;
@@ -264,6 +346,8 @@ class Room {
   destroy() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.reaper) clearInterval(this.reaper);
+    this.reaper = null;
     rooms.delete(this.code);
   }
 }
@@ -341,6 +425,18 @@ export function startServer({ port = 0, host = '0.0.0.0' } = {}) {
     let room = null;
     let side = null;
 
+    let aliveAt = Date.now();
+
+    // 心跳句柄提前声明并给出停止函数，
+    // 这样下面的所有回调都能安全引用，不依赖「声明先于回调触发」这种脆弱时序。
+    let heartbeat = null;
+    const stopHeartbeat = () => {
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+    };
+
     const send = (payload) => {
       if (socket.destroyed) return;
       try {
@@ -413,16 +509,65 @@ export function startServer({ port = 0, host = '0.0.0.0' } = {}) {
         }
       },
       () => {
+        // 收到关闭帧：客户端主动告别
         if (room) room.leave(socket);
+        stopHeartbeat();
         socket.destroy();
+      },
+      (opcode, payload) => {
+        // 收到 ping 就回 pong（保持连接活性）；收到 pong 只刷新时间戳
+        aliveAt = Date.now();
+        if (opcode === 0xa && payload && payload.length <= 125) {
+          if (!socket.destroyed) {
+            try {
+              socket.write(encodeFrame(0xa, payload));
+            } catch {
+              /* 忽略写失败 */
+            }
+          }
+        }
       },
     );
 
     socket.on('data', reader);
-    socket.on('error', () => {
-      if (room) room.leave(socket);
+    // data 事件也证明连接活跃（浏览器不一定回 pong，但会持续发 move）
+    socket.on('data', () => {
+      aliveAt = Date.now();
     });
-    socket.on('close', () => {
+
+    /**
+     * 心跳。
+     *
+     * 云平台的反向代理（Render / Railway / Cloudflare）会在连接「看起来空闲」时
+     * 直接掐断，而且**不通知任何一端** —— 客户端以为是网络卡了，
+     * 服务器以为客户端还在。每 30 秒发一次 ping 就能把这条连接标成活跃。
+     *
+     * 同时做反向检查：如果 75 秒没收到任何数据（连 pong 都没有），
+     * 说明对端已死，主动清理，避免房间永远挂着一个幽灵玩家。
+     */
+    heartbeat = setInterval(() => {
+      if (socket.destroyed) {
+        stopHeartbeat();
+        return;
+      }
+      if (Date.now() - aliveAt > 75_000) {
+        stopHeartbeat();
+        if (room) room.leave(socket);
+        socket.destroy();
+        return;
+      }
+      try {
+        socket.write(encodeFrame(0x9, ''));
+      } catch {
+        /* 写失败交给 onSocketGone 处理 */
+      }
+    }, 30_000);
+
+    // 统一的「连接没了」清理入口。
+    // 必须同时覆盖 end / close / error —— 见 onSocketGone 的注释，
+    // 只监听 close 会让客户端断开后服务器永远不知道。
+    onSocketGone(socket, () => {
+      stopHeartbeat();
       if (room) room.leave(socket);
     });
 

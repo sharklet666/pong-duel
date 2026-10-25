@@ -17,3 +17,9 @@ Thumbs.db
 
 # node
 node_modules/
+
+# ????
+_srv_dbg.mjs
+_dbg*.mjs
+_min.mjs
+
