@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0f1117" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>双人乒乓球 · Pong Duel</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <!-- 比分板：始终可见，固定在顶部，不参与画布缩放 -->
+      <header class="scoreboard" id="hud" hidden>
+        <div class="side p1">
+          <span class="label">P1</span>
+          <span class="num" id="scoreP1">0</span>
+        </div>
+        <div class="mid">
+          <span class="hint" id="fps">—</span>
+        </div>
+        <div class="side p2">
+          <span class="num" id="scoreP2">0</span>
+          <span class="label">P2</span>
+        </div>
+      </header>
+
+      <!-- 画布容器：用 flex:1 吃掉剩余空间，保证底部不被地址栏裁掉 -->
+      <div class="stage">
+        <canvas id="game" aria-label="乒乓球球场"></canvas>
+
+        <!-- 大厅 -->
+        <section class="overlay" id="lobby">
+          <div class="panel">
+            <h1>双人乒乓球</h1>
+            <p class="sub">两人一台设备，或两台手机联机</p>
+            <div class="actions">
+              <button class="btn primary" id="btnSolo">
+                <b>单机双人</b>
+                <small>一台设备，上下半屏各控一边</small>
+              </button>
+              <button class="btn" id="btnOnline">
+                <b>两台手机联机</b>
+                <small>建房间或输入房号</small>
+              </button>
+            </div>
+            <ul class="rules">
+              <li>球撞<b>左右墙</b>反弹</li>
+              <li>球出<b>上下边缘</b>，对方得分</li>
+              <li>连拉 8 拍会<b>分裂成两个球</b></li>
+              <li>每次击球都会<b>加速</b>（有上限）</li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- 建房/加入 -->
+        <section class="overlay" id="roomPanel" hidden>
+          <div class="panel">
+            <h2>联机</h2>
+            <button class="btn primary" id="btnCreate">
+              <b>创建房间</b>
+              <small>生成一个 4 位房号给对方</small>
+            </button>
+            <div class="joinrow">
+              <input
+                id="roomInput"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                maxlength="4"
+                placeholder="房号"
+                autocomplete="off"
+              />
+              <button class="btn" id="btnJoin">加入</button>
+            </div>
+            <p class="tiny" id="netStatus" data-status="idle">未连接</p>
+            <button class="btn ghost" id="btnBack">返回</button>
+          </div>
+        </section>
+
+        <!-- 等待对手 -->
+        <section class="overlay" id="waitPanel" hidden>
+          <div class="panel">
+            <p class="sub">房号</p>
+            <p class="roomcode" id="roomCode">----</p>
+            <p class="tiny" id="waitText">等待对手加入…</p>
+            <button class="btn ghost" id="btnBack2">退出</button>
+          </div>
+        </section>
+
+        <!-- 结束 -->
+        <section class="overlay" id="gameoverPanel" hidden>
+          <div class="panel">
+            <h2>本局结束</h2>
+            <p class="tiny" id="rematchHint">准备再来一局</p>
+            <button class="btn primary" id="btnRematch">再来一局</button>
+            <button class="btn ghost" id="btnBack3" onclick="location.reload()">返回大厅</button>
+          </div>
+        </section>
+
+        <!-- 提示条 -->
+        <div class="banner" id="banner" hidden>
+          <p id="bannerTitle"></p>
+          <small id="bannerSub"></small>
+        </div>
+
+        <div class="toast" id="toast" hidden></div>
+
+        <!-- 静音按钮：常驻角落 -->
+        <button class="sound" id="btnSound" aria-label="静音">🔊</button>
+      </div>
+    </main>
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>

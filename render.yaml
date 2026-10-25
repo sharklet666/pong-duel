@@ -1,0 +1,26 @@
+# 部署配置：Render / 类似平台
+#
+# 这个游戏的服务端是「一个 Node 进程 + WebSocket」，没有数据库、
+# 没有构建步骤、没有第三方依赖，所以配置极简。
+#
+# 用法：把仓库连到 Render，或在项目根目录执行
+#   render.yaml 会被自动识别
+#
+# 注意：不要把 bin/cloudflared.exe 传到仓库（52MB，且部署后不需要它）。
+
+services:
+  - type: web
+    name: pong-duel
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: ""          # 无依赖，无需构建
+    startCommand: node server.mjs
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: HOST
+        value: "0.0.0.0"
+    # PORT 由平台注入，server.mjs 已经读取 process.env.PORT
+    autoDeploy: true

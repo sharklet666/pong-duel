@@ -1,0 +1,15 @@
+{
+  "name": "pong-duel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "双人乒乓球 · Canvas + Web Audio + 双手机联机",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test/engine.test.mjs && node test/layout.test.mjs && node test/net.test.mjs && node test/e2e.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
