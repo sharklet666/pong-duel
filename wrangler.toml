@@ -1,0 +1,32 @@
+# Cloudflare Workers 部署配置
+#
+# 部署命令：
+#   npx wrangler deploy
+#
+# 首次部署前需要登录（会开浏览器让你授权，免费账号即可，不用绑卡）：
+#   npx wrangler login
+#
+# 部署完得到的地址形如：
+#   https://pong-duel.<你的子域名>.workers.dev
+#   这个地址永久有效，且不需要信用卡。
+
+name = "pong-duel"
+main = "workers/index.js"
+compatibility_date = "2026-10-01"
+
+# Durable Object：每个房号一个实例，负责该房间的对局模拟
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "GameRoom"
+
+# SQLite 后端（Workers 免费版只支持这个）
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoom"]
+
+# 静态资源：放在 public/ 里，只包含前端需要的文件
+# （index.html / style.css / js/*.js）。
+# 不要用 "." —— 那会把服务端代码、测试和文档一起发到公网。
+[assets]
+directory = "public"
+binding = "ASSETS"

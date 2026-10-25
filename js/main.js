@@ -588,13 +588,24 @@ function backToLobby() {
 // 启动
 // ---------------------------------------------------------------------------
 
+/** 生成 4 位随机房号。Workers 版用它作为 Durable Object 的名字。 */
+function randomRoomCode() {
+  // 1000–9999，避免以 0 开头造成的认知负担
+  return String(1000 + Math.floor(Math.random() * 9000));
+}
+
 function bindUi() {
   $('btnSolo').addEventListener('click', startSolo);
   $('btnOnline').addEventListener('click', startOnline);
   $('btnCreate').addEventListener('click', () => {
     const net = connectNet();
-    net.connect();
-    net.create(); // 走队列：还没连上也会在 open 后补发，不会静默失败
+    // 关键：先把房号定下来再连。
+    // Workers 版靠 URL 里的房号路由到不同的 Durable Object，
+    // 不带房号会直接被服务端拒绝（400）。Node 版忽略路径里的房号，
+    // 仍然走 create 指令，所以两种后端同一份代码都能用。
+    const code = randomRoomCode();
+    net.connect(code);
+    net.create();
   });
   $('btnJoin').addEventListener('click', () => {
     const code = $('roomInput').value.replace(/\D/g, '').slice(0, 4);
@@ -603,7 +614,7 @@ function bindUi() {
       return;
     }
     const net = connectNet();
-    net.connect();
+    net.connect(code);
     net.join(code);
   });
   $('btnBack').addEventListener('click', backToLobby);

@@ -23,3 +23,10 @@ _srv_dbg.mjs
 _dbg*.mjs
 _min.mjs
 
+
+# Workers ????
+.wrangler/
+.wrangler-dry/
+.wrangler-tmp/
+node_modules/
+

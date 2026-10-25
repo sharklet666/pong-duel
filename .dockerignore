@@ -1,0 +1,30 @@
+# 构建上下文排除项
+#
+# 关键：不要把这些打进镜像
+#   bin/cloudflared.exe   52MB，部署后完全用不到
+#   .tunnel.log           运行时日志
+#   test/                 测试代码，生产不需要
+#   *.md                  文档
+
+# 隧道二进制与日志
+bin/
+.tunnel.log
+*.log
+
+# 测试与文档
+test/
+*.md
+
+# 开发期脚本
+start-tunnel.mjs
+doctor.mjs
+tunnels.mjs
+_probe*.mjs
+_dbg*.mjs
+
+# 版本控制与系统文件
+.git/
+.gitignore
+.DS_Store
+Thumbs.db
+node_modules/

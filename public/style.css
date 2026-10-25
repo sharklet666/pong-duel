@@ -1,0 +1,486 @@
+/*
+ * 响应式策略的关键决定：
+ *   - 用 dvh（动态视口高度），不是 100vh —— 手机上 100vh 会把地址栏算进去，底部被裁
+ *   - 画布容器 flex:1，外层 flex-column，比绝对定位更抗键盘/地址栏变化
+ *   - 安全区（刘海、Home 指示条）用 env(safe-area-inset-*) 兜住
+ *   - 触屏区域普遍加大点击目标到 44px 以上
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0f1117;
+  --panel: rgba(22, 25, 34, 0.94);
+  --line: rgba(255, 255, 255, 0.12);
+  --ink: #eef1f6;
+  --ink-soft: #a8b0c0;
+  --ink-mute: #6b7385;
+  --p1: #5eead4;
+  --p2: #f472b6;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  /* 游戏页面禁止选中与长按菜单，避免拖拽时选中文字 */
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  height: 100vh; /* 老浏览器回退 */
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+@supports (height: 100dvh) {
+  .app {
+    height: 100dvh;
+  }
+}
+
+/* ---------- 比分板 ---------- */
+
+.scoreboard {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(15, 17, 23, 0.9);
+}
+
+.scoreboard[hidden] {
+  display: none;
+}
+
+.side {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.side.p2 {
+  justify-content: flex-end;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  opacity: 0.75;
+}
+
+.side.p1 .label,
+.side.p1 .num {
+  color: var(--p1);
+}
+
+.side.p2 .label,
+.side.p2 .num {
+  color: var(--p2);
+}
+
+.num {
+  font: 700 clamp(26px, 7vw, 40px) / 1 ui-monospace, "Cascadia Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.mid {
+  font-size: 11px;
+  color: var(--ink-mute);
+  font-family: ui-monospace, monospace;
+}
+
+/* ---------- 画布 ---------- */
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0; /* 关键：不写这条，flex 子项不会收缩，画布会撑破页面 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* ---------- 覆盖层 ---------- */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(12, 14, 20, 0.85);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 10;
+}
+
+.overlay[hidden] {
+  display: none;
+}
+
+.panel {
+  width: min(420px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 26px 22px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.panel h1 {
+  margin: 0;
+  font-size: clamp(22px, 6vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.panel h2 {
+  margin: 0 0 16px;
+  font-size: clamp(19px, 5vw, 23px);
+  font-weight: 650;
+}
+
+.sub {
+  margin: 8px 0 20px;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+}
+
+.tiny {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin: 12px 0;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---------- 按钮 ---------- */
+
+.btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  min-height: 58px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.06s;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.btn:active {
+  transform: scale(0.985);
+}
+
+.btn b {
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+.btn small {
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+
+.btn.primary {
+  background: linear-gradient(180deg, rgba(94, 234, 212, 0.2), rgba(94, 234, 212, 0.1));
+  border-color: rgba(94, 234, 212, 0.4);
+  color: #d8fff8;
+}
+
+.btn.primary small {
+  color: rgba(216, 255, 248, 0.6);
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-mute);
+  min-height: 44px;
+  margin-top: 6px;
+}
+
+.btn.ghost:hover {
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* ---------- 规则 ---------- */
+
+.rules {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--ink-mute);
+  line-height: 1.9;
+}
+
+.rules li::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--p1);
+}
+
+.rules b {
+  color: var(--ink-soft);
+  font-weight: 550;
+}
+
+/* ---------- 房间 ---------- */
+
+.joinrow {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.joinrow input {
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+  font: 600 20px/1 ui-monospace, monospace;
+  letter-spacing: 0.3em;
+  text-align: center;
+}
+
+.joinrow input:focus {
+  outline: none;
+  border-color: var(--p1);
+}
+
+.joinrow .btn {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 96px;
+  min-height: 52px;
+}
+
+.roomcode {
+  font: 700 clamp(34px, 11vw, 52px) / 1 ui-monospace, monospace;
+  letter-spacing: 0.16em;
+  color: var(--p1);
+  margin: 4px 0 0;
+}
+
+#netStatus[data-status="online"] {
+  color: var(--p1);
+}
+
+#netStatus[data-status="offline"] {
+  color: #f0a15f;
+}
+
+#netStatus[data-status="connecting"] {
+  color: var(--ink-soft);
+}
+
+/* ---------- 提示 ---------- */
+
+.banner {
+  position: absolute;
+  top: 16%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 22px;
+  border-radius: 12px;
+  background: rgba(20, 23, 32, 0.92);
+  border: 1px solid var(--line);
+  text-align: center;
+  pointer-events: none;
+  z-index: 9;
+  animation: pop 0.22s ease-out;
+}
+
+.banner[hidden] {
+  display: none;
+}
+
+.banner p {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.banner small {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+.toast {
+  position: absolute;
+  bottom: calc(18px + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: rgba(30, 34, 46, 0.96);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink);
+  z-index: 20;
+  max-width: calc(100% - 40px);
+}
+
+.toast[hidden] {
+  display: none;
+}
+
+/* ---------- 静音按钮 ---------- */
+
+.sound {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(20, 23, 32, 0.8);
+  color: var(--ink-soft);
+  font-size: 18px;
+  cursor: pointer;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.sound:active {
+  transform: scale(0.94);
+}
+
+/* ---------- 横屏适配 ---------- */
+
+/* 横屏时比分板移到左侧竖向，把高度全部让给球场 */
+@media (orientation: landscape) and (max-height: 560px) {
+  .app {
+    flex-direction: row;
+  }
+
+  .scoreboard {
+    flex-direction: column;
+    justify-content: center;
+    gap: 18px;
+    padding: 14px 12px;
+    border-bottom: none;
+    border-right: 1px solid var(--line);
+    min-width: 92px;
+  }
+
+  .side {
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .side.p2 {
+    flex-direction: column-reverse;
+  }
+
+  .panel {
+    padding: 20px 18px;
+  }
+
+  .rules {
+    display: none; /* 横屏矮屏时藏起规则，保证按钮都看得到 */
+  }
+}
+
+/* 极窄屏（小屏手机竖屏） */
+@media (max-width: 360px) {
+  .panel {
+    padding: 18px 14px;
+  }
+  .num {
+    font-size: 24px;
+  }
+  .scoreboard {
+    padding: 8px 12px;
+  }
+}
+
+/* 降低动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .banner {
+    animation: none;
+  }
+  .btn {
+    transition: none;
+  }
+}

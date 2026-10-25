@@ -50,14 +50,30 @@ export class Net {
     for (const payload of pending) this.send(payload);
   }
 
-  connect() {
+  /**
+   * 建立连接。
+   *
+   * 两种后端模式，靠 URL 携带的参数区分：
+   *   - Node 版（server.mjs）：连 /ws 后自己发 create / join 指令
+   *   - Workers 版：房号在 URL 路径里（/ws/<room>），服务端直接分配方位，
+   *     连接成功即入局，不需要再发指令
+   *
+   * @param {string} [room] 可选房号；省略时用当前 this.room
+   */
+  connect(room) {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
     this.closedByUs = false;
+    if (room) this.room = room;
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}/ws`;
+    // 带上房号：Workers 版用它路由到不同的 Durable Object，
+    // 这样两对朋友可以同时玩，互不干扰。
+    const path = this.room ? `/ws/${encodeURIComponent(this.room)}` : '/ws';
+    const url = `${proto}//${location.host}${path}`;
+    // 记录房号是否来自 URL（Workers 模式），重连时不必再发 join
+    this.roomFromUrl = Boolean(this.room);
     this.onStatus?.('connecting');
 
     let ws;
@@ -110,8 +126,9 @@ export class Net {
     setTimeout(() => {
       if (this.closedByUs) return;
       this.connect();
-      // 重连后自动回到原房间，玩家不用重输房号
-      if (this.room) {
+      // Node 版需要重发 join 指令；Workers 版靠 URL 里的房号自动重入，
+      // 多发一条 join 也不会被处理（服务端会忽略未知类型），所以两种都能工作。
+      if (this.room && !this.roomFromUrl) {
         this.send({ type: 'join', room: this.room });
       }
     }, delay);
